@@ -1,0 +1,120 @@
+---
+title: "lab7"
+author: "R. Spellenberg"
+date: "2023-02-23"
+output: 
+  html_document:
+    code_folding: hide
+---
+
+```{r setup, echo = TRUE, warning = FALSE, message = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, results = FALSE)
+library(tidyverse)
+library(here)
+library(broom)
+
+### Part One: Wrangling and Visualizing Spatial Data
+library(sf) ### simple features
+library(tmap)
+
+```
+
+## Part One
+
+### Read in CA county outlines 
+```{r}
+ca_counties_sf <- read_sf(here("data/ca_counties/CA_counties_TIGER2016.shp"))
+
+### geometry column is sticky unless you intentionally drop it
+ca_subset_sf <- ca_counties_sf %>% 
+  janitor::clean_names() %>% 
+  select(county_name = name, land_area = aland)
+
+### drops geometry column
+ca_subset_df <- ca_subset_sf %>% 
+  as.data.frame() %>% 
+  select(-geometry)
+```
+
+### Check and set the CRS (Coordinate Reference System)
+```{r}
+ca_subset_sf %>% st_crs() ### or st_crs(ca_subset_sf)
+
+ggplot() + 
+  geom_sf(data = ca_subset_sf, aes(fill = land_area),
+          color = 'white', size = 0.1) +
+  scale_fill_gradientn(colors = c('cyan', 'blue', 'purple')) +
+  theme_void()
+```
+
+### Load another dataset on an invasive species
+```{r}
+sesbania_sf <- read_sf(here("data/red_sesbania/ds80.shp")) %>% 
+  janitor::clean_names()
+
+sesbania_sf %>% st_crs()
+
+sesbania_3857_sf <- sesbania_sf %>% 
+  st_transform(3857)
+
+```
+
+### Plot the two together
+```{r}
+### the order you place the layers builds on top of each other (first placed is the base layer)
+
+ggplot() +
+  geom_sf(data = ca_subset_sf, fill = 'gray70') +
+  geom_sf(data = sesbania_3857_sf, size = 1, color = 'red') +
+  theme_void()
+```
+
+```{r}
+ca_sesb_sf <- ca_subset_sf %>% 
+  st_join(sesbania_3857_sf)
+
+sesb_counts_sf <- ca_sesb_sf %>% 
+  group_by(county_name) %>% 
+  summarize(n_records = sum(!is.na(id)))
+```
+
+### Plot the results
+
+"Choropleth" map
+```{r}
+ggplot(data = sesb_counts_sf %>% 
+         mutate(n_records = ifelse(n_records == 0, NA, n_records))) +
+  geom_sf(aes(fill = n_records), color = 'gray20', size = 0.1) + 
+  geom_sf(data = sesbania_3857_sf, color = 'midnightblue') +
+  scale_fill_gradientn(colors = c('lightyellow', 'orange', 'red'), na.value = 'lightgray') + theme_void()
+```
+
+### Plot just the points in Solano County
+```{r}
+solano_sesb_sf <- sesbania_3857_sf %>% 
+  filter(county == 'Solano')
+
+solano_sf <- ca_subset_sf %>% 
+  filter(county_name == 'Solano')
+
+ggplot() +
+  geom_sf(data = solano_sf) +
+  geom_sf(data = solano_sesb_sf, color = 'midnightblue') +
+  theme_void()
+```
+
+### Make an interactive map
+```{r}
+### set tmap interactive mode
+tmap_mode('view') ### can use 'plot' to make static map
+
+tm_shape(ca_subset_sf) +
+  tm_fill("land_area", palette = 'BuGn') +
+  tm_shape(sesbania_3857_sf) +
+  tm_dots()
+
+### look up vignette on using tmap
+```
+
+
+
