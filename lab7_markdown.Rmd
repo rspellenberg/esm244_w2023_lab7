@@ -17,9 +17,13 @@ library(broom)
 library(sf) ### simple features
 library(tmap)
 
+### Part Two: Spatial Analysis and Kriging
+library(gstat)
+library(stars)
+
 ```
 
-## Part One
+# Part One
 
 ### Read in CA county outlines 
 ```{r}
@@ -116,5 +120,7 @@ tm_shape(ca_subset_sf) +
 ### look up vignette on using tmap
 ```
 
-
+Layer Sources
+- naturalearthdata.com (rpackage - 'rnaturalearth')
+?rnaturalearth in the console will tell you about the arguments of the package
 
