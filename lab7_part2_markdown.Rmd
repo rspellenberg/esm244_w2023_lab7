@@ -1,0 +1,123 @@
+---
+title: 'Lab 7: Part Two'
+author: "R. Spellenberg"
+date: "2023-02-23"
+output: html_document
+---
+
+```{r setup, echo = TRUE, warning = FALSE, message = FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = FALSE, warning = FALSE, results = FALSE)
+library(tidyverse)
+library(here)
+library(broom)
+library(sf) ### simple features
+library(tmap)
+library(gstat)
+library(stars)
+```
+
+# Part Two: Spatial Analysis and Kriging
+
+## Read in CA depth to groundwater data
+```{r}
+ca_counties_sf <- read_sf(here('data/ca_counties'),
+                          layer = 'CA_Counties_TIGER2016') %>% 
+  janitor::clean_names() %>% 
+  select(name)
+
+st_crs(ca_counties_sf)
+
+## read in groundwater depth data
+ca_dgw_sf <- read_sf(here('data/ca_dgw/F2013_DBGS_Points_20150720_093252.gpkg')) %>%
+  janitor::clean_names()
+
+# st_crs(ca_dgw_sf)
+
+### Transform DGW data to same CRS as CA counties
+ca_dgw_sf <- st_transform(ca_dgw_sf, st_crs(ca_counties_sf)) ### doesn't hard code in the CRS in case someone changes the original file
+
+### Make a quick ggplot
+ggplot() +
+  geom_sf(data = ca_counties_sf) +
+  geom_sf(data = ca_dgw_sf, aes(color = dgbs)) +
+  scale_color_gradient(low = 'pink', high = 'darkred') +
+  theme_void()
+
+tmap_mode('view')
+tm_shape(ca_dgw_sf) +
+  tm_dots('dgbs', palette = 'Blues')
+```
+
+## Wrangle to just San Joaquin County
+```{r}
+sj_county_sf <- ca_counties_sf %>% 
+  filter(name == 'San Joaquin') ### if you want to select multiple, you would use %in% instead of ==
+
+sj_depth_sf <- ca_dgw_sf %>% 
+  st_intersection(sj_county_sf)
+
+ggplot() +
+  geom_sf(data = sj_county_sf) +
+  geom_sf(data = sj_depth_sf, aes(color = dgbs)) +
+  theme_void() +
+    scale_color_viridis_c()
+```
+
+## Set up for kriging
+```{r}
+well_duplicates <- sj_depth_sf %>% 
+  janitor::get_dupes(latitude, longitude)
+
+sj_depth_sf <- sj_depth_sf %>% 
+  filter(!local_well %in% well_duplicates$local_well)
+```
+
+## Make a variogram
+```{r}
+sj_dgw_vgm <- variogram(dgbs ~ 1, data = sj_depth_sf) ### ~ 1 if we don't know other regressors
+
+plot(sj_dgw_vgm)
+
+### from gstat package
+sj_dgw_vgm_fit <- fit.variogram(sj_dgw_vgm, 
+                                model = vgm(model = 'Gau'))
+
+
+sj_dgw_vgm_fit1 <- fit.variogram(sj_dgw_vgm, 
+                                 model = vgm(model = 'Gau',
+                                            nugget = 20,
+                                            sill = 3000,
+                                            range = 30000))
+
+plot(sj_dgw_vgm, sj_dgw_vgm_fit)
+plot(sj_dgw_vgm, sj_dgw_vgm_fit1)
+
+attr(sj_dgw_vgm_fit, 'SSErr')
+attr(sj_dgw_vgm_fit1, 'SSErr')
+```
+
+## Spatial Kriging
+```{r}
+sj_grid <- st_bbox(sj_county_sf) %>% 
+  stars::st_as_stars(dx = 1000, dy = 1000) %>% 
+  st_crop(sj_county_sf)
+```
+
+```{r}
+sj_dgw_krige <- krige(dgbs ~ 1, sj_depth_sf, sj_grid,
+                      model = sj_dgw_vgm_fit1)
+
+plot(sj_dgw_krige)
+
+krige_sf <- as.data.frame(sj_dgw_krige) %>% 
+  st_as_sf(coords = c('x', 'y')) %>% 
+  drop_na(var1.pred)
+st_crs(krige_sf) <- 3857
+
+ggplot(data = krige_sf) +
+  geom_sf(aes(color = var1.pred)) +
+  scale_color_gradient(low = 'blue', high = 'yellow')
+
+### come back and get original points back on the plot
+```
+
